@@ -39,7 +39,6 @@ async function sendText(chatId, text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text }),
     });
-    console.log(`Sent text to ${chatId} at ${new Date().toISOString()}: ${text}`);
   } catch (error) {
     console.error(`Error sending text at ${new Date().toISOString()}: ${error.message}`);
   }
@@ -51,8 +50,7 @@ async function sendKb(chatId, text, kb) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, reply_markup: { inline_keyboard: kb } }),
-    });
-    console.log(`Sent keyboard to ${chatId} at ${new Date().toISOString()}: ${text}`);
+  });
   } catch (error) {
     console.error(`Error sending keyboard at ${new Date().toISOString()}: ${error.message}`);
   }
@@ -339,11 +337,9 @@ async function handleConsult(chatId, data) {
   } else if (option === 'ot') {
     await sendText(chatId, 'Introduce OT_ID:');
     userStates[chatId] = { type: 'consult:ot', fields: ['OT_ID'], current: 0, data: {} };
-    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: consult:ot`);
   } else if (option === 'fac') {
     await sendText(chatId, 'Introduce número de factura:');
     userStates[chatId] = { type: 'consult:fac', fields: ['num'], current: 0, data: {} };
-    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: consult:fac`);
   }
 }
 
@@ -352,18 +348,15 @@ async function handleSearch(chatId, data) {
   if (option === 'cli') {
     await sendText(chatId, 'Introduce consulta (nombre, NIF, teléfono, email):');
     userStates[chatId] = { type: 'search:cli', fields: ['query'], current: 0, data: {} };
-    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: search:cli`);
   } else if (option === 'ot') {
     await sendText(chatId, 'Introduce consulta (OT_ID, matrícula, estado):');
     userStates[chatId] = { type: 'search:ot', fields: ['query'], current: 0, data: {} };
-    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: search:ot`);
   }
 }
 
 async function wizardStep(chatId, text) {
   if (!userStates[chatId]) return;
   const state = userStates[chatId];
-  console.log(`Wizard step for ${chatId} at ${new Date().toISOString()}: Current field ${state.fields[state.current]}, Text: ${text}`);
   const field = state.fields[state.current];
 
   if (text) state.data[field] = text;
@@ -387,7 +380,6 @@ async function wizardStep(chatId, text) {
 async function handleWizardActions(chatId, data) {
   const [wiz, type, action, field] = data.split(':');
   const state = userStates[chatId];
-  console.log(`Wizard action for ${chatId} at ${new Date().toISOString()}: ${action}, Type: ${type}, Field: ${field}`);
 
   if (action === 'confirm') {
     if (type === 'cli:new') await crearCliente(chatId, state.data);
