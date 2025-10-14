@@ -54,7 +54,7 @@ app.get('/pause', async (req, res) => {
 
 app.get('/resume', async (req, res) => {
   isBotActive = true;
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=https://tu-app.onrender.com/webhook`); // Reemplaza con tu URL
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=https://talleragil.onrender.com/webhook`); // Reemplaza con tu URL
   console.log(`Reanudado at ${new Date().toISOString()}`);
   if (ADMIN_CHAT_ID) await sendText(ADMIN_CHAT_ID, 'Bot reanudado');
   res.send('Reanudado');
