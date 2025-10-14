@@ -4,7 +4,6 @@ const { google } = require('googleapis');
 const fetch = require('node-fetch');
 const { v4: uuid } = require('uuid');
 
-// Definición de clases
 class SheetsDB {
   constructor(auth, spreadsheetId) {
     this.auth = auth;
@@ -18,6 +17,7 @@ class SheetsDB {
         spreadsheetId: this.spreadsheetId,
         range,
       });
+      console.log(`SheetsDB.getData success for ${range} at ${new Date().toISOString()}`);
       return response.data.values || [];
     } catch (error) {
       console.error(`SheetsDB.getData error at ${new Date().toISOString()}: ${error.message}`);
@@ -33,22 +33,9 @@ class SheetsDB {
         valueInputOption: 'RAW',
         resource: { values },
       });
-      console.log(`SheetsDB.appendData success at ${new Date().toISOString()} for range ${range}`);
+      console.log(`SheetsDB.appendData success for ${range} with values ${JSON.stringify(values)} at ${new Date().toISOString()}`);
     } catch (error) {
-      console.error(`SheetsDB.appendData error at ${new Date().toISOString()}: ${error.message}`);
-    }
-  }
-
-  async updateData(range, values) {
-    try {
-      await this.sheets.spreadsheets.values.update({
-        spreadsheetId: this.spreadsheetId,
-        range,
-        valueInputOption: 'RAW',
-        resource: { values },
-      });
-    } catch (error) {
-      console.error(`SheetsDB.updateData error at ${new Date().toISOString()}: ${error.message}`);
+      console.error(`SheetsDB.appendData error at ${new Date().toISOString()}: ${error.message} - Values: ${JSON.stringify(values)}`);
     }
   }
 }
@@ -70,17 +57,6 @@ class DriveStorage {
       return null;
     }
   }
-
-  async copyFile(fileId, name) {
-    try {
-      const copiedFileMetadata = { name, parents: [this.rootId] };
-      const response = await this.drive.files.copy({ fileId, resource: copiedFileMetadata });
-      return response.data.id;
-    } catch (error) {
-      console.error(`DriveStorage.copyFile error at ${new Date().toISOString()}: ${error.message}`);
-      return null;
-    }
-  }
 }
 
 class ClientService {
@@ -92,77 +68,10 @@ class ClientService {
     try {
       const id = uuid();
       await this.db.appendData('CLIENTES!A:D', [[id, name, phone, new Date().toISOString()]]);
-      console.log(`ClientService.createClient success: ${id}, ${name}, ${phone}`);
+      console.log(`Client created: ${id}, ${name}, ${phone} at ${new Date().toISOString()}`);
       return { id, name, phone };
     } catch (error) {
       console.error(`ClientService.createClient error at ${new Date().toISOString()}: ${error.message}`);
-      return null;
-    }
-  }
-}
-
-class OTService {
-  constructor(db, storage) {
-    this.db = db;
-    this.storage = storage;
-  }
-
-  async createOT(clientId, description) {
-    try {
-      const id = uuid();
-      const folderId = await this.storage.createFolder(`OT_${id}`);
-      await this.db.appendData('OTS!A:E', [[id, clientId, description, folderId, new Date().toISOString()]]);
-      console.log(`OTService.createOT success: ${id}, ${clientId}, ${description}`);
-      return { id, clientId, description, folderId };
-    } catch (error) {
-      console.error(`OTService.createOT error at ${new Date().toISOString()}: ${error.message}`);
-      return null;
-    }
-  }
-
-  async updateField(id, field, value) {
-    try {
-      const data = await this.db.getData('OTS!A:E');
-      const row = data.find(r => r[0] === id);
-      if (row) {
-        row[field] = value;
-        await this.db.updateData(`OTS!A:E`, data);
-        console.log(`Update OT ${id}: ${field} = ${value} at ${new Date().toISOString()}`);
-      }
-    } catch (error) {
-      console.error(`OTService.updateField error at ${new Date().toISOString()}: ${error.message}`);
-    }
-  }
-
-  async getOT(id) {
-    try {
-      const data = await this.db.getData('OTS!A:E');
-      return data.find(r => r[0] === id) || null;
-    } catch (error) {
-      console.error(`OTService.getOT error at ${new Date().toISOString()}: ${error.message}`);
-      return null;
-    }
-  }
-}
-
-class InvoiceService {
-  constructor(storage, templateId, nombreEmisor, nifEmisor, domicilioEmisor, tarifaHora, ivaPorDefecto) {
-    this.storage = storage;
-    this.templateId = templateId;
-    this.nombreEmisor = nombreEmisor;
-    this.nifEmisor = nifEmisor;
-    this.domicilioEmisor = domicilioEmisor;
-    this.tarifaHora = tarifaHora;
-    this.ivaPorDefecto = ivaPorDefecto;
-  }
-
-  async generateInvoice(otId, hours) {
-    try {
-      const fileId = await this.storage.copyFile(this.templateId, `Factura_OT_${otId}`);
-      console.log(`Generated invoice for OT ${otId} at ${new Date().toISOString()}`);
-      return fileId;
-    } catch (error) {
-      console.error(`InvoiceService.generateInvoice error at ${new Date().toISOString()}: ${error.message}`);
       return null;
     }
   }
@@ -174,18 +83,13 @@ app.use(bodyParser.json());
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const DRIVE_ROOT_ID = process.env.DRIVE_ROOT_ID;
-const TEMPLATE_ID = process.env.TEMPLATE_ID;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
-const NOMBRE_EMISOR = process.env.NOMBRE_EMISOR;
-const NIF_EMISOR = process.env.NIF_EMISOR;
-const DOMICILIO_EMISOR = process.env.DOMICILIO_EMISOR;
-const TARIFA_HORA = 50;
-const IVA_POR_DEFECTO = 21;
 
 let isBotActive = true;
+let userStates = {}; // Para rastrear el estado del formulario por chatId
 
 // Inicialización de dependencias
-let db, storage, clientService, otService, invoiceService;
+let db, storage, clientService;
 try {
   const auth = new google.auth.GoogleAuth({
     keyFile: './credentials.json',
@@ -194,14 +98,10 @@ try {
   db = new SheetsDB(auth, SPREADSHEET_ID);
   storage = new DriveStorage(auth, DRIVE_ROOT_ID);
   clientService = new ClientService(db);
-  otService = new OTService(db, storage);
-  invoiceService = new InvoiceService(storage, TEMPLATE_ID, NOMBRE_EMISOR, NIF_EMISOR, DOMICILIO_EMISOR, TARIFA_HORA, IVA_POR_DEFECTO);
 } catch (error) {
   console.error(`Error initializing services at ${new Date().toISOString()}: ${error.message}`);
-  // Modo de emergencia: inicia el servidor aunque fallen las dependencias
 }
 
-// Funciones de envío a Telegram
 async function sendText(chatId, text) {
   try {
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
@@ -228,72 +128,79 @@ async function sendKb(chatId, text, replyMarkup) {
   }
 }
 
-// Webhook principal con logging y botones
 app.post('/webhook', async (req, res) => {
   if (!isBotActive) return res.sendStatus(200);
   const update = req.body;
   const chatId = update.message ? update.message.chat.id : (update.callback_query ? update.callback_query.message.chat.id : null);
   const text = update.message ? update.message.text : null;
   const data = update.callback_query ? update.callback_query.data : null;
+  const messageId = update.message ? update.message.message_id : (update.callback_query ? update.callback_query.message.message_id : null);
 
   try {
-    console.log(`Received message: ${text || data} at ${new Date().toISOString()}`);
+    console.log(`Received: ${text || data} from ${chatId} at ${new Date().toISOString()}`);
+    if (!userStates[chatId]) userStates[chatId] = { step: 'start' };
+
     if (text) {
       if (text === '/start') {
-        await sendKb(chatId, 'Bienvenido al Bot Taller Ágil. Selecciona una opción:', {
+        userStates[chatId] = { step: 'start' };
+        await sendKb(chatId, 'Bienvenido a Taller Ágil. Crea un nuevo cliente:', {
+          inline_keyboard: [[{ text: 'Nuevo Cliente', callback_data: 'start_new_client' }]],
+        });
+      } else if (userStates[chatId].step === 'enter_name') {
+        userStates[chatId].name = text;
+        userStates[chatId].step = 'enter_phone';
+        await sendKb(chatId, 'Introduce el teléfono:', {
+          inline_keyboard: [[{ text: 'Siguiente', callback_data: 'next_phone' }]],
+        });
+      } else if (userStates[chatId].step === 'enter_phone') {
+        userStates[chatId].phone = text;
+        userStates[chatId].step = 'confirm_client';
+        await sendKb(chatId, `Confirmar: Nombre: ${userStates[chatId].name}, Teléfono: ${text}`, {
           inline_keyboard: [
-            [{ text: 'Nuevo Cliente', callback_data: 'new_client' }],
-            [{ text: 'Nueva OT', callback_data: 'new_ot' }],
-            [{ text: 'Ver OT', callback_data: 'view_ot' }],
+            [{ text: 'Guardar', callback_data: 'save_client' }],
+            [{ text: 'Editar Nombre', callback_data: 'edit_name' }],
+            [{ text: 'Editar Teléfono', callback_data: 'edit_phone' }],
+            [{ text: 'Cancelar', callback_data: 'start' }],
           ],
         });
-      } else if (text === '/menu') {
-        await sendKb(chatId, 'Menú de opciones:', {
-          inline_keyboard: [
-            [{ text: 'Nuevo Cliente', callback_data: 'new_client' }],
-            [{ text: 'Nueva OT', callback_data: 'new_ot' }],
-            [{ text: 'Ver OT', callback_data: 'view_ot' }],
-          ],
-        });
-      } else if (text.startsWith('/nuevo_cliente')) {
-        const [_, name, phone] = text.split(' ');
-        if (name && phone) {
-          const client = await clientService.createClient(name, phone);
-          if (client) await sendText(chatId, `Cliente creado: ${client.name} (ID: ${client.id})`);
-          else await sendText(chatId, 'Error al crear cliente.');
-        } else {
-          await sendText(chatId, 'Uso: /nuevo_cliente Nombre Teléfono');
-        }
-      } else if (text.startsWith('/nueva_ot')) {
-        const [_, clientId, description] = text.split(' ', 3);
-        if (clientId && description) {
-          const ot = await otService.createOT(clientId, description);
-          if (ot) await sendText(chatId, `OT creada: ${ot.id} para cliente ${clientId}`);
-          else await sendText(chatId, 'Error al crear OT.');
-        } else {
-          await sendText(chatId, 'Uso: /nueva_ot ClientId Descripción');
-        }
-      } else if (text.startsWith('/ver_ot')) {
-        const [_, otId] = text.split(' ');
-        if (otId) {
-          const ot = await otService.getOT(otId);
-          await sendText(chatId, ot ? `OT ${otId}: ${JSON.stringify(ot)}` : 'OT no encontrada');
-        }
-      } else if (text.startsWith('/generar_factura')) {
-        const [_, otId] = text.split(' ');
-        if (otId) {
-          const fileId = await invoiceService.generateInvoice(otId, 1);
-          await sendText(chatId, fileId ? `Factura generada para OT ${otId}: ${fileId}` : 'Error al generar factura.');
-        }
       }
     }
+
     if (data) {
-      if (data === 'new_client') {
-        await sendText(chatId, 'Envía /nuevo_cliente Nombre Teléfono para crear un cliente.');
-      } else if (data === 'new_ot') {
-        await sendText(chatId, 'Envía /nueva_ot ClientId Descripción para crear una OT.');
-      } else if (data === 'view_ot') {
-        await sendText(chatId, 'Envía /ver_ot OTId para ver una OT.');
+      if (data === 'start_new_client') {
+        userStates[chatId] = { step: 'enter_name' };
+        await sendKb(chatId, 'Introduce el nombre:', {
+          inline_keyboard: [[{ text: 'Siguiente', callback_data: 'next_name' }]],
+        });
+      } else if (data === 'next_name' && userStates[chatId].step === 'enter_name') {
+        await sendText(chatId, 'Por favor, escribe el nombre primero.');
+      } else if (data === 'next_phone' && userStates[chatId].step === 'enter_phone') {
+        await sendText(chatId, 'Por favor, escribe el teléfono primero.');
+      } else if (data === 'save_client' && userStates[chatId].step === 'confirm_client') {
+        const client = await clientService.createClient(userStates[chatId].name, userStates[chatId].phone);
+        if (client) {
+          await sendKb(chatId, `Cliente guardado: ${client.name} (ID: ${client.id})`, {
+            inline_keyboard: [[{ text: 'Nuevo Cliente', callback_data: 'start_new_client' }]],
+          });
+          delete userStates[chatId];
+        } else {
+          await sendText(chatId, 'Error al guardar el cliente. Revisa los logs.');
+        }
+      } else if (data === 'edit_name' && userStates[chatId].step === 'confirm_client') {
+        userStates[chatId].step = 'enter_name';
+        await sendKb(chatId, 'Edita el nombre:', {
+          inline_keyboard: [[{ text: 'Siguiente', callback_data: 'next_name' }]],
+        });
+      } else if (data === 'edit_phone' && userStates[chatId].step === 'confirm_client') {
+        userStates[chatId].step = 'enter_phone';
+        await sendKb(chatId, 'Edita el teléfono:', {
+          inline_keyboard: [[{ text: 'Siguiente', callback_data: 'next_phone' }]],
+        });
+      } else if (data === 'start') {
+        userStates[chatId] = { step: 'start' };
+        await sendKb(chatId, 'Bienvenido a Taller Ágil. Crea un nuevo cliente:', {
+          inline_keyboard: [[{ text: 'Nuevo Cliente', callback_data: 'start_new_client' }]],
+        });
       }
     }
   } catch (error) {
@@ -303,7 +210,6 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-// Pause/Resume con logging
 app.get('/pause', async (req, res) => {
   isBotActive = false;
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook`);
@@ -320,21 +226,12 @@ app.get('/resume', async (req, res) => {
   res.send('Reanudado');
 });
 
-// Wake para activación manual
 app.get('/wake', async (req, res) => {
   console.log(`Wake request at ${new Date().toISOString()} (outside hours)`);
   if (ADMIN_CHAT_ID) await sendText(ADMIN_CHAT_ID, 'Bot despertado manualmente');
   res.send('Bot despertado - ahora activo temporalmente');
 });
 
-// API para OT
-app.get('/api/ot/:id', async (req, res) => {
-  const id = req.params.id;
-  const ot = await otService.getOT(id);
-  res.json(ot || { error: 'OT no encontrada' });
-});
-
-// Inicia el servidor con manejo de errores
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Bot running on port ${PORT} at ${new Date().toISOString()}`);
