@@ -1,0 +1,16 @@
+{
+  "name": "taller-agil-poc",
+  "version": "1.0.0",
+  "description": "Taller Ágil Telegram Bot Backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "body-parser": "^1.19.0",
+    "googleapis": "^100.0.0",
+    "node-fetch": "^2.6.1",
+    "uuid": "^8.3.2"
+  }
+}
