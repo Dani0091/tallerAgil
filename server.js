@@ -27,6 +27,7 @@ try {
   });
   sheets = google.sheets({ version: 'v4', auth });
   drive = google.drive({ version: 'v3', auth });
+  console.log(`Services initialized at ${new Date().toISOString()}`);
 } catch (error) {
   console.error(`Error initializing services at ${new Date().toISOString()}: ${error.message}`);
 }
@@ -38,6 +39,7 @@ async function sendText(chatId, text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text }),
     });
+    console.log(`Sent text to ${chatId} at ${new Date().toISOString()}: ${text}`);
   } catch (error) {
     console.error(`Error sending text at ${new Date().toISOString()}: ${error.message}`);
   }
@@ -50,6 +52,7 @@ async function sendKb(chatId, text, kb) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, reply_markup: { inline_keyboard: kb } }),
     });
+    console.log(`Sent keyboard to ${chatId} at ${new Date().toISOString()}: ${text}`);
   } catch (error) {
     console.error(`Error sending keyboard at ${new Date().toISOString()}: ${error.message}`);
   }
@@ -248,6 +251,7 @@ async function handleClientes(chatId, data) {
     sendKb(chatId, 'Clientes', kb);
   } else if (option === 'new') {
     userStates[chatId] = { type: 'cli:new', fields: ['nombre', 'apellidos', 'telefono', 'email', 'nif', 'direccion', 'razon_social', 'notas'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: cli:new`);
     await sendText(chatId, 'Introduce nombre:');
   }
 }
@@ -263,6 +267,7 @@ async function handleOT(chatId, data) {
     sendKb(chatId, 'OT', kb);
   } else if (option === 'new') {
     userStates[chatId] = { type: 'ot:new', fields: ['cliente_id', 'matricula', 'marca', 'modelo', 'descripcion', 'horas', 'piezas_notas', 'consumibles_notas', 'coste_estimado'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: ot:new`);
     await sendText(chatId, 'Introduce cliente_id:');
   } else if (option === 'list') {
     const ots = (await getSheetData('OTS!A:M')).slice(-10);
@@ -282,6 +287,7 @@ async function handleFacturas(chatId, data) {
   } else if (option === 'fromOT') {
     await sendText(chatId, 'Indica OT_ID:');
     userStates[chatId] = { type: 'fac:fromOT', fields: ['OT_ID'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: fac:fromOT`);
   } else if (option === 'list') {
     const facturas = (await getSheetData('FACTURAS!A:M')).slice(-5);
     const msg = 'Últimas 5 Facturas:\n' + facturas.map(row => `${row[3]} - Total: ${row[7]} - Pagado: ${row[8]}`).join('\n');
@@ -299,6 +305,7 @@ async function handlePagos(chatId, data) {
     sendKb(chatId, 'Pagos', kb);
   } else if (option === 'reg') {
     userStates[chatId] = { type: 'pay:reg', fields: ['factura_id', 'importe', 'metodo', 'justificante_link'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: pay:reg`);
     await sendText(chatId, 'Introduce factura_id:');
   }
 }
@@ -332,9 +339,11 @@ async function handleConsult(chatId, data) {
   } else if (option === 'ot') {
     await sendText(chatId, 'Introduce OT_ID:');
     userStates[chatId] = { type: 'consult:ot', fields: ['OT_ID'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: consult:ot`);
   } else if (option === 'fac') {
     await sendText(chatId, 'Introduce número de factura:');
     userStates[chatId] = { type: 'consult:fac', fields: ['num'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: consult:fac`);
   }
 }
 
@@ -343,15 +352,18 @@ async function handleSearch(chatId, data) {
   if (option === 'cli') {
     await sendText(chatId, 'Introduce consulta (nombre, NIF, teléfono, email):');
     userStates[chatId] = { type: 'search:cli', fields: ['query'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: search:cli`);
   } else if (option === 'ot') {
     await sendText(chatId, 'Introduce consulta (OT_ID, matrícula, estado):');
     userStates[chatId] = { type: 'search:ot', fields: ['query'], current: 0, data: {} };
+    console.log(`Wizard started for ${chatId} at ${new Date().toISOString()}: search:ot`);
   }
 }
 
 async function wizardStep(chatId, text) {
   if (!userStates[chatId]) return;
   const state = userStates[chatId];
+  console.log(`Wizard step for ${chatId} at ${new Date().toISOString()}: Current field ${state.fields[state.current]}, Text: ${text}`);
   const field = state.fields[state.current];
 
   if (text) state.data[field] = text;
@@ -375,6 +387,7 @@ async function wizardStep(chatId, text) {
 async function handleWizardActions(chatId, data) {
   const [wiz, type, action, field] = data.split(':');
   const state = userStates[chatId];
+  console.log(`Wizard action for ${chatId} at ${new Date().toISOString()}: ${action}, Type: ${type}, Field: ${field}`);
 
   if (action === 'confirm') {
     if (type === 'cli:new') await crearCliente(chatId, state.data);
@@ -438,13 +451,6 @@ app.get('/resume', async (req, res) => {
 app.get('/wake', async (req, res) => {
   console.log(`Wake request at ${new Date().toISOString()} (outside hours)`);
   res.send('Bot despertado - ahora activo temporalmente');
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Bot running on port ${PORT} at ${new Date().toISOString()}`);
-}).on('error', (error) => {
-  console.error(`Server error at ${new Date().toISOString()}: ${error.message}`);
 });
 
 // Funciones adicionales
