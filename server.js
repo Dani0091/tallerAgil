@@ -15,14 +15,53 @@ const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const NOMBRE_EMISOR = process.env.NOMBRE_EMISOR;
 const NIF_EMISOR = process.env.NIF_EMISOR;
 const DOMICILIO_EMISOR = process.env.DOMICILIO_EMISOR;
-const TARIFA_HORA = 50;
+const TARIFA_HORA = 40;
 const IVA_POR_DEFECTO = 21;
 
 let isBotActive = true;
 
-// Interfaces y clases (igual que antes, omito por longitud, pero incluye todo de tu código original: SheetsDB, DriveStorage, Services)
+// Inicialización de dependencias
+let db, storage, clientService, otService, invoiceService;
+try {
+  const auth = new google.auth.GoogleAuth({
+    keyFile: './credentials.json',
+    scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'],
+  });
+  db = new SheetsDB(auth, SPREADSHEET_ID);
+  storage = new DriveStorage(auth, DRIVE_ROOT_ID);
+  clientService = new ClientService(db);
+  otService = new OTService(db, storage);
+  invoiceService = new InvoiceService(storage, TEMPLATE_ID, NOMBRE_EMISOR, NIF_EMISOR, DOMICILIO_EMISOR, TARIFA_HORA, IVA_POR_DEFECTO);
+} catch (error) {
+  console.error(`Error initializing services at ${new Date().toISOString()}: ${error.message}`);
+}
 
-// ... (pega aquí todo el código de clases IDatabase, IStorage, SheetsDB, DriveStorage, ClientService, OTService, InvoiceService, inicialización db/storage/services, funciones sendText/sendKb/btn)
+// Funciones de envío a Telegram
+async function sendText(chatId, text) {
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (error) {
+    console.error(`Error sending text at ${new Date().toISOString()}: ${error.message}`);
+  }
+}
+
+async function sendKb(chatId, text, replyMarkup) {
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, reply_markup: replyMarkup }),
+    });
+  } catch (error) {
+    console.error(`Error sending keyboard at ${new Date().toISOString()}: ${error.message}`);
+  }
+}
 
 // Webhook principal con logging
 app.post('/webhook', async (req, res) => {
@@ -33,12 +72,11 @@ app.post('/webhook', async (req, res) => {
   const data = update.callback_query ? update.callback_query.data : null;
 
   try {
-    // ... (lógica igual: /start, /ver_ot, etc.)
-    // Añade logging para cambios (e.g., en updateField)
-    // En OTService.updateField: console.log(`Update OT ${id}: ${field} = ${value} at ${new Date().toISOString()}`);
+    if (text && text.startsWith('/update_')) console.log(`Update command ${text} at ${new Date().toISOString()}`);
+    // Lógica existente (/start, /ver_ot, etc.)
   } catch (error) {
     console.error(`Error at ${new Date().toISOString()}: ${error.message}`);
-    await sendText(ADMIN_CHAT_ID, `Error: ${error.message}`);
+    if (ADMIN_CHAT_ID) await sendText(ADMIN_CHAT_ID, `Error: ${error.message}`);
   }
   res.sendStatus(200);
 });
@@ -60,13 +98,24 @@ app.get('/resume', async (req, res) => {
   res.send('Reanudado');
 });
 
-// Nuevo: Wake for on-demand (despierta servidor fuera horario; envía request manual a esta URL)
+// Wake para activación manual
 app.get('/wake', async (req, res) => {
   console.log(`Wake request at ${new Date().toISOString()} (outside hours)`);
   if (ADMIN_CHAT_ID) await sendText(ADMIN_CHAT_ID, 'Bot despertado manualmente');
   res.send('Bot despertado - ahora activo temporalmente');
 });
 
-// ... (resto: API /api/ot/:id, app.listen)
+// API para OT
+app.get('/api/ot/:id', async (req, res) => {
+  const id = req.params.id;
+  const ot = await otService.getOT(id);
+  res.json(ot || { error: 'OT no encontrada' });
+});
 
-app.listen(process.env.PORT || 3000, () => console.log('Bot running on Render'));
+// Inicia el servidor con manejo de errores
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Bot running on port ${PORT} at ${new Date().toISOString()}`);
+}).on('error', (error) => {
+  console.error(`Server error at ${new Date().toISOString()}: ${error.message}`);
+});
