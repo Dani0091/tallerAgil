@@ -13,29 +13,43 @@ class SheetsDB {
   }
 
   async getData(range) {
-    const response = await this.sheets.spreadsheets.values.get({
-      spreadsheetId: this.spreadsheetId,
-      range,
-    });
-    return response.data.values || [];
+    try {
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range,
+      });
+      return response.data.values || [];
+    } catch (error) {
+      console.error(`SheetsDB.getData error at ${new Date().toISOString()}: ${error.message}`);
+      return [];
+    }
   }
 
   async appendData(range, values) {
-    await this.sheets.spreadsheets.values.append({
-      spreadsheetId: this.spreadsheetId,
-      range,
-      valueInputOption: 'RAW',
-      resource: { values },
-    });
+    try {
+      await this.sheets.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: 'RAW',
+        resource: { values },
+      });
+      console.log(`SheetsDB.appendData success at ${new Date().toISOString()} for range ${range}`);
+    } catch (error) {
+      console.error(`SheetsDB.appendData error at ${new Date().toISOString()}: ${error.message}`);
+    }
   }
 
   async updateData(range, values) {
-    await this.sheets.spreadsheets.values.update({
-      spreadsheetId: this.spreadsheetId,
-      range,
-      valueInputOption: 'RAW',
-      resource: { values },
-    });
+    try {
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range,
+        valueInputOption: 'RAW',
+        resource: { values },
+      });
+    } catch (error) {
+      console.error(`SheetsDB.updateData error at ${new Date().toISOString()}: ${error.message}`);
+    }
   }
 }
 
@@ -47,15 +61,25 @@ class DriveStorage {
   }
 
   async createFolder(name) {
-    const fileMetadata = { name, mimeType: 'application/vnd.google-apps.folder', parents: [this.rootId] };
-    const response = await this.drive.files.create({ resource: fileMetadata, fields: 'id' });
-    return response.data.id;
+    try {
+      const fileMetadata = { name, mimeType: 'application/vnd.google-apps.folder', parents: [this.rootId] };
+      const response = await this.drive.files.create({ resource: fileMetadata, fields: 'id' });
+      return response.data.id;
+    } catch (error) {
+      console.error(`DriveStorage.createFolder error at ${new Date().toISOString()}: ${error.message}`);
+      return null;
+    }
   }
 
   async copyFile(fileId, name) {
-    const copiedFileMetadata = { name, parents: [this.rootId] };
-    const response = await this.drive.files.copy({ fileId, resource: copiedFileMetadata });
-    return response.data.id;
+    try {
+      const copiedFileMetadata = { name, parents: [this.rootId] };
+      const response = await this.drive.files.copy({ fileId, resource: copiedFileMetadata });
+      return response.data.id;
+    } catch (error) {
+      console.error(`DriveStorage.copyFile error at ${new Date().toISOString()}: ${error.message}`);
+      return null;
+    }
   }
 }
 
@@ -65,9 +89,15 @@ class ClientService {
   }
 
   async createClient(name, phone) {
-    const id = uuid();
-    await this.db.appendData('CLIENTES!A:D', [[id, name, phone, new Date().toISOString()]]);
-    return { id, name, phone };
+    try {
+      const id = uuid();
+      await this.db.appendData('CLIENTES!A:D', [[id, name, phone, new Date().toISOString()]]);
+      console.log(`ClientService.createClient success: ${id}, ${name}, ${phone}`);
+      return { id, name, phone };
+    } catch (error) {
+      console.error(`ClientService.createClient error at ${new Date().toISOString()}: ${error.message}`);
+      return null;
+    }
   }
 }
 
@@ -78,25 +108,40 @@ class OTService {
   }
 
   async createOT(clientId, description) {
-    const id = uuid();
-    const folderId = await this.storage.createFolder(`OT_${id}`);
-    await this.db.appendData('OTS!A:E', [[id, clientId, description, folderId, new Date().toISOString()]]);
-    return { id, clientId, description, folderId };
+    try {
+      const id = uuid();
+      const folderId = await this.storage.createFolder(`OT_${id}`);
+      await this.db.appendData('OTS!A:E', [[id, clientId, description, folderId, new Date().toISOString()]]);
+      console.log(`OTService.createOT success: ${id}, ${clientId}, ${description}`);
+      return { id, clientId, description, folderId };
+    } catch (error) {
+      console.error(`OTService.createOT error at ${new Date().toISOString()}: ${error.message}`);
+      return null;
+    }
   }
 
   async updateField(id, field, value) {
-    const data = await this.db.getData('OTS!A:E');
-    const row = data.find(r => r[0] === id);
-    if (row) {
-      row[field] = value;
-      await this.db.updateData(`OTS!A:E`, data);
-      console.log(`Update OT ${id}: ${field} = ${value} at ${new Date().toISOString()}`);
+    try {
+      const data = await this.db.getData('OTS!A:E');
+      const row = data.find(r => r[0] === id);
+      if (row) {
+        row[field] = value;
+        await this.db.updateData(`OTS!A:E`, data);
+        console.log(`Update OT ${id}: ${field} = ${value} at ${new Date().toISOString()}`);
+      }
+    } catch (error) {
+      console.error(`OTService.updateField error at ${new Date().toISOString()}: ${error.message}`);
     }
   }
 
   async getOT(id) {
-    const data = await this.db.getData('OTS!A:E');
-    return data.find(r => r[0] === id) || null;
+    try {
+      const data = await this.db.getData('OTS!A:E');
+      return data.find(r => r[0] === id) || null;
+    } catch (error) {
+      console.error(`OTService.getOT error at ${new Date().toISOString()}: ${error.message}`);
+      return null;
+    }
   }
 }
 
@@ -112,10 +157,14 @@ class InvoiceService {
   }
 
   async generateInvoice(otId, hours) {
-    const fileId = await this.storage.copyFile(this.templateId, `Factura_OT_${otId}`);
-    // Lógica para reemplazar placeholders (simulada)
-    console.log(`Generated invoice for OT ${otId} at ${new Date().toISOString()}`);
-    return fileId;
+    try {
+      const fileId = await this.storage.copyFile(this.templateId, `Factura_OT_${otId}`);
+      console.log(`Generated invoice for OT ${otId} at ${new Date().toISOString()}`);
+      return fileId;
+    } catch (error) {
+      console.error(`InvoiceService.generateInvoice error at ${new Date().toISOString()}: ${error.message}`);
+      return null;
+    }
   }
 }
 
@@ -179,7 +228,7 @@ async function sendKb(chatId, text, replyMarkup) {
   }
 }
 
-// Webhook principal con logging
+// Webhook principal con logging y botones
 app.post('/webhook', async (req, res) => {
   if (!isBotActive) return res.sendStatus(200);
   const update = req.body;
@@ -188,21 +237,41 @@ app.post('/webhook', async (req, res) => {
   const data = update.callback_query ? update.callback_query.data : null;
 
   try {
+    console.log(`Received message: ${text || data} at ${new Date().toISOString()}`);
     if (text) {
-      console.log(`Received message: ${text} at ${new Date().toISOString()}`);
       if (text === '/start') {
-        await sendText(chatId, 'Bot Taller Ágil iniciado. Usa /nuevo_cliente Nombre Teléfono para crear un cliente.');
+        await sendKb(chatId, 'Bienvenido al Bot Taller Ágil. Selecciona una opción:', {
+          inline_keyboard: [
+            [{ text: 'Nuevo Cliente', callback_data: 'new_client' }],
+            [{ text: 'Nueva OT', callback_data: 'new_ot' }],
+            [{ text: 'Ver OT', callback_data: 'view_ot' }],
+          ],
+        });
+      } else if (text === '/menu') {
+        await sendKb(chatId, 'Menú de opciones:', {
+          inline_keyboard: [
+            [{ text: 'Nuevo Cliente', callback_data: 'new_client' }],
+            [{ text: 'Nueva OT', callback_data: 'new_ot' }],
+            [{ text: 'Ver OT', callback_data: 'view_ot' }],
+          ],
+        });
       } else if (text.startsWith('/nuevo_cliente')) {
         const [_, name, phone] = text.split(' ');
         if (name && phone) {
           const client = await clientService.createClient(name, phone);
-          await sendText(chatId, `Cliente creado: ${client.name} (ID: ${client.id})`);
+          if (client) await sendText(chatId, `Cliente creado: ${client.name} (ID: ${client.id})`);
+          else await sendText(chatId, 'Error al crear cliente.');
+        } else {
+          await sendText(chatId, 'Uso: /nuevo_cliente Nombre Teléfono');
         }
       } else if (text.startsWith('/nueva_ot')) {
         const [_, clientId, description] = text.split(' ', 3);
         if (clientId && description) {
           const ot = await otService.createOT(clientId, description);
-          await sendText(chatId, `OT creada: ${ot.id} para cliente ${clientId}`);
+          if (ot) await sendText(chatId, `OT creada: ${ot.id} para cliente ${clientId}`);
+          else await sendText(chatId, 'Error al crear OT.');
+        } else {
+          await sendText(chatId, 'Uso: /nueva_ot ClientId Descripción');
         }
       } else if (text.startsWith('/ver_ot')) {
         const [_, otId] = text.split(' ');
@@ -213,15 +282,19 @@ app.post('/webhook', async (req, res) => {
       } else if (text.startsWith('/generar_factura')) {
         const [_, otId] = text.split(' ');
         if (otId) {
-          const fileId = await invoiceService.generateInvoice(otId, 1); // Horas fijas como ejemplo
-          await sendText(chatId, `Factura generada para OT ${otId}: ${fileId}`);
+          const fileId = await invoiceService.generateInvoice(otId, 1);
+          await sendText(chatId, fileId ? `Factura generada para OT ${otId}: ${fileId}` : 'Error al generar factura.');
         }
       }
     }
-    if (data && data.startsWith('update_')) {
-      const [_, otId, field, value] = data.split('_');
-      await otService.updateField(otId, field, value);
-      await sendText(chatId, `Campo ${field} actualizado a ${value} para OT ${otId}`);
+    if (data) {
+      if (data === 'new_client') {
+        await sendText(chatId, 'Envía /nuevo_cliente Nombre Teléfono para crear un cliente.');
+      } else if (data === 'new_ot') {
+        await sendText(chatId, 'Envía /nueva_ot ClientId Descripción para crear una OT.');
+      } else if (data === 'view_ot') {
+        await sendText(chatId, 'Envía /ver_ot OTId para ver una OT.');
+      }
     }
   } catch (error) {
     console.error(`Error at ${new Date().toISOString()}: ${error.message}`);
