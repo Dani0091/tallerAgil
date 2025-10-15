@@ -18,7 +18,7 @@ app.use(bodyParser.json());
 
 const BOT_TOKEN = process.env.BOT_TOKEN; // Token del bot Telegram.
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID; // ID de chat para notificaciones.
-const TARIFA_HORA = 50; // Tarifa por hora.
+const TARIFA_HORA = 40; // Tarifa por hora ajustada a 40€.
 const IVA_POR_DEFECTO = 21; // IVA por defecto (%).
 const SUPABASE_URL = process.env.SUPABASE_URL; // URL de Supabase.
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY; // Clave anónima de Supabase.
@@ -102,18 +102,20 @@ class InvoiceService {
     const page = pdfDoc.addPage([595, 842]); // A4 size
     const { width, height } = page.getSize();
 
-    // Header
+    // Encabezado del Taller
     page.drawText('TALLER ÁGIL', { x: 50, y: height - 70, size: 24, color: rgb(0.8, 0.2, 0.2), font });
-    page.drawText('C/ Ejemplo 123, 28001 Madrid, España', { x: 50, y: height - 90, size: 12, font }); // Ajusta dirección real.
+    page.drawText('C/ Ejemplo 123, 28001 Madrid, España', { x: 50, y: height - 90, size: 12, font });
+    page.drawText('NIF: A12345678', { x: 50, y: height - 110, size: 12, font });
+    page.drawText('Teléfono: 910 123 456', { x: 50, y: height - 130, size: 12, font });
     page.drawText('FACTURA', { x: width - 150, y: height - 70, size: 18, font });
     page.drawText(`Fecha: ${fecha}`, { x: width - 150, y: height - 90, size: 12, font });
     page.drawText(`Nº Factura: ${numero}`, { x: width - 150, y: height - 110, size: 12, font });
 
-    // Cliente
+    // Datos del Cliente (basados en OT)
     page.drawText('Facturado a:', { x: 50, y: height - 150, size: 14, font });
     page.drawText(`${cliente.nombre} ${cliente.apellidos}`, { x: 50, y: height - 170, size: 12, font });
     page.drawText(`NIF: ${cliente.nif}`, { x: 50, y: height - 190, size: 12, font });
-    page.drawText(cliente.direccion, { x: 50, y: height - 210, size: 12, font });
+    page.drawText(cliente.direccion || 'Sin dirección', { x: 50, y: height - 210, size: 12, font });
     page.drawText(`Matrícula: ${ot.matricula}`, { x: 50, y: height - 230, size: 12, font });
 
     // Tabla de Conceptos
@@ -186,13 +188,33 @@ async function sendKb(chatId, text, kb) {
 
 function btn(label, callback) { return { text: label, callback_data: callback }; }
 
-// Handlers (Menús y Wizards - Simplificado por longitud; expande según necesidades)
+// Endpoints para activar el servicio y webhook
+app.get('/wake', (req, res) => {
+  console.log('Service woken up at ' + new Date().toISOString());
+  isBotActive = true;
+  res.send('Service is awake');
+});
+
+app.get('/resume', async (req, res) => {
+  console.log('Resuming webhook at ' + new Date().toISOString());
+  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=https://${req.hostname}/webhook`);
+  const data = await response.json();
+  if (data.ok) {
+    console.log('Webhook set successfully');
+    res.send('Webhook resumed');
+  } else {
+    console.error('Failed to set webhook:', data);
+    res.status(500).send('Failed to resume webhook');
+  }
+});
+
+// Handlers (Menús y Wizards)
 app.post('/webhook', async (req, res) => {
   const { message, callback_query } = req.body;
   const chatId = message?.chat?.id || callback_query?.message?.chat?.id;
   const text = message?.text || callback_query?.data;
 
-  if (text === '/start') {
+  if (text === '/start' && isBotActive) {
     await sendKb(chatId, 'Menú Principal', [
       [btn('👤 Clientes', 'menu:clientes'), btn('🔧 OT', 'menu:ots')],
       [btn('💰 Facturas', 'menu:facturas'), btn('📊 Dashboard', 'menu:dashboard')],
@@ -203,4 +225,4 @@ app.post('/webhook', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));;
+app.listen(PORT, () => console.log(`Bot running on port ${PORT} at ${new Date().toISOString()}`));
