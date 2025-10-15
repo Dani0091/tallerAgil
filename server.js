@@ -208,6 +208,10 @@ app.get('/resume', async (req, res) => {
   }
 });
 
+app.get('/test', (req, res) => {
+  res.send('Server is working');
+});
+
 // Handlers (Menús y Wizards)
 app.post('/webhook', async (req, res) => {
   const { message, callback_query } = req.body;
