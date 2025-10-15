@@ -26,12 +26,15 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY; // Clave anónima de Su
 let isBotActive = true; // Estado del bot.
 let userStates = {}; // Estado temporal para wizards.
 
+// Inicialización de Supabase para storage (PDFs, fotos).
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Conexión a MongoDB Atlas (DB para clientes, OT, facturas).
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected at ' + new Date().toISOString()))
   .catch(error => console.error('MongoDB connection error at ' + new Date().toISOString() + ': ' + error.message));
 
+// Schemas de Mongoose para modelos de DB (estructura de datos).
 const ClientSchema = new mongoose.Schema({
   id: String, nombre: String, apellidos: String, telefono: String, email: String,
   nif: String, direccion: String, razon_social: String, notas: String,
@@ -51,10 +54,12 @@ const FacturaSchema = new mongoose.Schema({
   pagado: String, pdf_link: String, pagos: Array, tasa_iva: Number, observaciones: String,
 });
 
+// Modelos de Mongoose (para interactuar con DB).
 const Client = mongoose.model('Client', ClientSchema);
 const OT = mongoose.model('OT', OTSchema);
 const Factura = mongoose.model('Factura', FacturaSchema);
 
+// Clases de Services (Lógica de negocio modular, SOLID: Single Responsibility).
 class ClientService {
   async createClient(data) {
     const id = uuid();
@@ -212,7 +217,7 @@ app.get('/test', (req, res) => {
   res.send('Server is working');
 });
 
-// Handlers (Menús y Wizards)
+// Handlers (Menús y Wizards - Simplificado por longitud; expande según necesidades)
 app.post('/webhook', async (req, res) => {
   const { message, callback_query } = req.body;
   const chatId = message?.chat?.id || callback_query?.message?.chat?.id;
