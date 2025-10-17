@@ -147,9 +147,31 @@ class BotController {
       return;
     }
     
+
     // FACTURAS
     if (action === 'menu:facturas') {
       await this.showFacturasMenu(chatId, messageId);
+      return;
+    }
+    
+    if (action === 'facturas:nueva') {
+      await this.startFacturaWizard(chatId, messageId);
+      return;
+    }
+    
+    if (action.startsWith('facturas:generar:')) {
+      const otId = action.replace('facturas:generar:', '');
+      await this.generateFacturaFromOT(chatId, messageId, otId);
+      return;
+    }
+    
+    if (action === 'facturas:lista') {
+      await this.showFacturasList(chatId, messageId);
+      return;
+    }
+    
+    if (action === 'facturas:pendientes') {
+      await this.showFacturasPendientes(chatId, messageId);
       return;
     }
     
@@ -322,18 +344,185 @@ class BotController {
     }
   }
 
+
   // ==========================================
-  // FACTURAS
+  // GESTIÓN DE FACTURAS
   // ==========================================
   
   async showFacturasMenu(chatId, messageId) {
-    await editMessage(
-      chatId,
-      messageId,
-      '<b>💰 Gestión de Facturas</b>\n\n🚧 <b>Próximamente...</b>\n\nEsta funcionalidad estará disponible pronto.',
-      [[btn('🔙 Volver', 'menu:principal')]]
-    );
+    const menu = [
+      [btn('➕ Nueva Factura', 'facturas:nueva')],
+      [btn('📋 Lista de Facturas', 'facturas:lista')],
+      [btn('💳 Facturas Pendientes', 'facturas:pendientes')],
+      [btn('🔙 Volver', 'menu:principal')]
+    ];
+    
+    await editMessage(chatId, messageId, '<b>💰 Gestión de Facturas</b>\n\nSelecciona una opción:', menu);
   }
+
+  async startFacturaWizard(chatId, messageId) {
+    try {
+      // Obtener OT finalizadas
+      const ots = await otService.listByState('finalizado', 10);
+      
+      if (!ots || ots.length === 0) {
+        await editMessage(
+          chatId,
+          messageId,
+          '<b>⚠️ No hay OT finalizadas</b>\n\nPara generar una factura, primero debes tener órdenes de trabajo con estado "finalizado".',
+          [[btn('🔙 Volver', 'menu:facturas')]]
+        );
+        return;
+      }
+
+      // Crear botones con las OT
+      const otButtons = ots.map(ot => [
+        btn(
+          `🔧 OT-${ot.ot_id.slice(0, 8)} - ${ot.matricula}`,
+          `facturas:generar:${ot.ot_id}`
+        )
+      ]);
+      
+      otButtons.push([btn('🔙 Cancelar', 'menu:facturas')]);
+
+      await editMessage(
+        chatId,
+        messageId,
+        '<b>➕ Nueva Factura</b>\n\nSelecciona la OT a facturar:',
+        otButtons
+      );
+    } catch (error) {
+      console.error('Error en startFacturaWizard:', error);
+      await sendMessage(chatId, '❌ Error obteniendo OT: ' + error.message);
+    }
+  }
+
+  async generateFacturaFromOT(chatId, messageId, otId) {
+    try {
+      await editMessage(chatId, messageId, '⏳ <b>Generando factura...</b>\nEsto puede tardar unos segundos.', []);
+      
+      // Importar servicios necesarios
+      const facturaService = require('../services/FacturaService');
+      const { generateFacturaPDF } = require('../utils/pdfGenerator');
+      const { uploadPDF } = require('../helpers/supabaseStorage');
+      const { sendTyping } = require('../helpers/telegramHelpers');
+      const { BOT_TOKEN } = require('../config/telegram');
+
+      // Crear factura
+      const factura = await facturaService.createFromOT(otId);
+
+      // Generar PDF
+      await sendTyping(chatId);
+      const pdfBuffer = await generateFacturaPDF(factura);
+
+      // Subir a Supabase
+      const fileName = `Factura_${factura.numero.replace('/', '_')}.pdf`;
+      const pdfUrl = await uploadPDF(pdfBuffer, fileName);
+
+      // Actualizar factura con el link del PDF
+      factura.pdf_link = pdfUrl;
+      await factura.save();
+
+      // Enviar PDF por Telegram
+      await sendTyping(chatId);
+      const formData = new FormData();
+      formData.append('chat_id', chatId);
+      formData.append('document', new Blob([pdfBuffer], { type: 'application/pdf' }), fileName);
+      formData.append('caption', 
+        `✅ <b>Factura ${factura.numero} generada</b>\n\n` +
+        `💰 Total: ${factura.total_factura.toFixed(2)}€\n` +
+        `📅 Vencimiento: ${new Date(factura.fecha_vencimiento).toLocaleDateString('es-ES')}\n` +
+        `🔗 <a href="${pdfUrl}">Ver en línea</a>`,
+        { parse_mode: 'HTML' }
+      );
+
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, {
+        method: 'POST',
+        body: formData
+      });
+
+      // Mostrar resumen con botones
+      await sendKeyboard(
+        chatId,
+        `✅ <b>Factura ${factura.numero}</b>\n\n` +
+        `🔧 OT: ${otId.slice(0, 8)}\n` +
+        `💰 Total: <b>${factura.total_factura.toFixed(2)}€</b>\n` +
+        `📊 Estado: ${factura.estado_pago}\n` +
+        `📅 Vencimiento: ${new Date(factura.fecha_vencimiento).toLocaleDateString('es-ES')}`,
+        [
+          [btn('📋 Ver Facturas', 'facturas:lista')],
+          [btn('🏠 Menú Principal', 'menu:principal')]
+        ]
+      );
+
+      await messageService.saveMessage(chatId, 'assistant', `Factura ${factura.numero} generada`);
+
+    } catch (error) {
+      console.error('Error generando factura:', error);
+      await sendMessage(
+        chatId,
+        `❌ <b>Error generando factura</b>\n\n${error.message}\n\nIntenta de nuevo más tarde.`
+      );
+    }
+  }
+
+  async showFacturasList(chatId, messageId) {
+    try {
+      const { facturas } = await require('../services/FacturaService').listFacturas(0, 10);
+      
+      let text = '<b>📋 Lista de Facturas</b>\n\n';
+      
+      if (!facturas || facturas.length === 0) {
+        text += 'No hay facturas registradas.';
+      } else {
+        facturas.forEach((f, i) => {
+          const emoji = f.estado_pago === 'pagado' ? '✅' : f.estado_pago === 'vencido' ? '🔴' : '⏳';
+          text += `${i + 1}. ${emoji} <b>${f.numero}</b>\n`;
+          text += `   💰 Total: ${f.total_factura.toFixed(2)}€\n`;
+          text += `   📊 ${f.estado_pago}\n`;
+          if (f.monto_pendiente > 0) {
+            text += `   ⚠️ Pendiente: ${f.monto_pendiente.toFixed(2)}€\n`;
+          }
+          text += `   👤 ${f.cliente.nombre}\n\n`;
+        });
+      }
+      
+      await editMessage(chatId, messageId, text, [[btn('🔙 Volver', 'menu:facturas')]]);
+    } catch (error) {
+      await sendMessage(chatId, '❌ Error obteniendo facturas: ' + error.message);
+    }
+  }
+
+  async showFacturasPendientes(chatId, messageId) {
+    try {
+      const facturaService = require('../services/FacturaService');
+      const pendientes = await facturaService.listByState('pendiente', 20);
+      const parciales = await facturaService.listByState('parcial', 20);
+      const todas = [...pendientes, ...parciales];
+      
+      let text = '<b>💳 Facturas Pendientes de Pago</b>\n\n';
+      
+      if (todas.length === 0) {
+        text += '✅ No hay facturas pendientes.';
+      } else {
+        let totalPendiente = 0;
+        todas.forEach((f, i) => {
+          const emoji = f.estado_pago === 'parcial' ? '⏳' : '❗';
+          text += `${i + 1}. ${emoji} <b>${f.numero}</b>\n`;
+          text += `   💰 Pendiente: ${f.monto_pendiente.toFixed(2)}€\n`;
+          text += `   📅 Venc: ${new Date(f.fecha_vencimiento).toLocaleDateString('es-ES')}\n\n`;
+          totalPendiente += f.monto_pendiente;
+        });
+        
+        text += `\n<b>💰 Total pendiente: ${totalPendiente.toFixed(2)}€</b>`;
+      }
+      
+      await editMessage(chatId, messageId, text, [[btn('🔙 Volver', 'menu:facturas')]]);
+    } catch (error) {
+      await sendMessage(chatId, '❌ Error: ' + error.message);
+    }
+  }
+
 
   // ==========================================
   // BÚSQUEDA
