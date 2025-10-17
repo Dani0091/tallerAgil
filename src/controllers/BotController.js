@@ -129,7 +129,29 @@ class BotController {
       await this.startOTWizard(chatId, messageId);
       return;
     }
-    
+    if (action.startsWith('ots:select_cliente:')) {
+  const clienteId = action.replace('ots:select_cliente:', '');
+  userStates[chatId] = {
+    action: 'crear_ot',
+    step: 'matricula',
+    data: { cliente_id: clienteId }
+  };
+  
+  await editMessage(
+    chatId,
+    messageId,
+    '<b>➕ Nueva OT</b>\n\n🚗 <b>Paso 2:</b> Ingresa la <b>matrícula</b> del vehículo',
+    [[btn('❌ Cancelar', 'ots:cancelar')]]
+  );
+  return;
+}
+
+if (action === 'ots:buscar_cliente') {
+  await this.searchClienteForOT(chatId, messageId);
+  return;
+}
+
+
     if (action === 'ots:lista') {
       await this.showOTList(chatId, messageId);
       return;
@@ -278,20 +300,46 @@ class BotController {
     await editMessage(chatId, messageId, '<b>🔧 Gestión de Órdenes de Trabajo</b>\n\nSelecciona una opción:', menu);
   }
 
-  async startOTWizard(chatId, messageId) {
-    userStates[chatId] = {
-      action: 'crear_ot',
-      step: 'cliente_id',
-      data: {}
-    };
+async startOTWizard(chatId, messageId) {
+  try {
+    // Obtener lista de clientes
+    const { clientes } = await clientService.listClients(0, 10);
     
+    if (!clientes || clientes.length === 0) {
+      await editMessage(
+        chatId,
+        messageId,
+        '<b>⚠️ No hay clientes registrados</b>\n\nPara crear una OT, primero debes registrar al menos un cliente.',
+        [
+          [btn('➕ Crear Cliente', 'clientes:nuevo')],
+          [btn('🔙 Volver', 'menu:ots')]
+        ]
+      );
+      return;
+    }
+
+    // Crear botones con los clientes
+    const clienteButtons = clientes.slice(0, 8).map(c => [
+      btn(
+        `👤 ${c.nombre} ${c.apellidos} - ${c.nif}`,
+        `ots:select_cliente:${c.cliente_id}`
+      )
+    ]);
+    
+    clienteButtons.push([btn('🔍 Buscar más...', 'ots:buscar_cliente')]);
+    clienteButtons.push([btn('❌ Cancelar', 'ots:cancelar')]);
+
     await editMessage(
       chatId,
       messageId,
-      '<b>➕ Nueva Orden de Trabajo</b>\n\n📝 <b>Paso 1 de 6:</b> Ingresa el <b>ID del cliente</b>\n\n💡 Usa el menú Clientes → Buscar para obtener el ID',
-      [[btn('❌ Cancelar', 'ots:cancelar')]]
+      '<b>➕ Nueva Orden de Trabajo</b>\n\n👤 <b>Paso 1:</b> Selecciona el cliente:',
+      clienteButtons
     );
+  } catch (error) {
+    console.error('Error en startOTWizard:', error);
+    await sendMessage(chatId, '❌ Error: ' + error.message);
   }
+}
 
   async showOTList(chatId, messageId) {
     try {
@@ -316,6 +364,21 @@ class BotController {
       await sendMessage(chatId, '❌ Error obteniendo OT: ' + error.message);
     }
   }
+
+  async searchClienteForOT(chatId, messageId) {
+  userStates[chatId] = {
+    action: 'buscar_cliente_ot',
+    step: 'query'
+  };
+  
+  await editMessage(
+    chatId,
+    messageId,
+    '<b>🔍 Buscar Cliente para OT</b>\n\nIngresa <b>nombre</b> o <b>NIF</b> del cliente:',
+    [[btn('❌ Cancelar', 'ots:cancelar')]]
+  );
+}
+
 
   // ==========================================
   // DASHBOARD
@@ -624,58 +687,87 @@ class BotController {
       }
       return;
     }
+// ========== WIZARD: BUSCAR CLIENTE PARA OT ==========
+if (state.action === 'buscar_cliente_ot') {
+  try {
+    const clientes = await clientService.searchClients(text, 10);
+    
+    if (clientes.length === 0) {
+      await sendMessage(chatId, '❌ No se encontraron clientes.');
+      delete userStates[chatId];
+      return;
+    }
+
+    // Crear botones con resultados
+    const clienteButtons = clientes.map(c => [
+      btn(
+        `👤 ${c.nombre} ${c.apellidos} - ${c.nif}`,
+        `ots:select_cliente:${c.cliente_id}`
+      )
+    ]);
+    
+    clienteButtons.push([btn('🔙 Menú OT', 'menu:ots')]);
+
+    await sendKeyboard(
+      chatId,
+      '<b>🔍 Resultados</b>\n\nSelecciona el cliente:',
+      clienteButtons
+    );
+    
+    delete userStates[chatId];
+  } catch (error) {
+    await sendMessage(chatId, '❌ Error en búsqueda: ' + error.message);
+    delete userStates[chatId];
+  }
+  return;
+}
+
     
     // ========== WIZARD: CREAR OT ==========
     if (state.action === 'crear_ot') {
-      const steps = ['cliente_id', 'matricula', 'marca', 'modelo', 'descripcion', 'horas'];
+      //const steps = ['cliente_id', 'matricula', 'marca', 'modelo', 'descripcion', 'horas'];
+      const steps = ['matricula', 'marca', 'modelo', 'descripcion'];
       const stepIndex = steps.indexOf(state.step);
       
-      if (stepIndex < steps.length - 1) {
-        state.step = steps[stepIndex + 1];
-        const stepNames = {
-          matricula: 'la matrícula del vehículo',
-          marca: 'la marca del vehículo',
-          modelo: 'el modelo del vehículo',
-          descripcion: 'la descripción del trabajo a realizar',
-          horas: 'las horas estimadas (número)'
-        };
+  if (stepIndex < steps.length - 1) {
+    state.step = steps[stepIndex + 1];
+    const stepNames = {
+      marca: 'la <b>marca</b> del vehículo',
+      modelo: 'el <b>modelo</b> del vehículo',
+      descripcion: 'la <b>descripción</b> del trabajo a realizar'
+    };
         
-        await sendKeyboard(
-          chatId,
-          `<b>➕ Nueva OT</b>\n\n📝 <b>Paso ${stepIndex + 2} de 6:</b> Ingresa ${stepNames[state.step]}`,
-          [[btn('❌ Cancelar', 'ots:cancelar')]]
-        );
-      } else {
-        // Guardar OT
-        await sendMessage(chatId, '⏳ Creando orden de trabajo...');
-        
-        try {
-          // Convertir horas a número
-          state.data.horas = parseFloat(state.data.horas) || 1;
-          
-          const ot = await otService.createOT(state.data);
-          delete userStates[chatId];
-          
-          const successText =
-            '✅ <b>Orden de Trabajo creada exitosamente</b>\n\n' +
-            `🔧 <b>OT-${ot.OT_ID.slice(0, 8)}</b>\n` +
-            `🚗 Vehículo: ${ot.marca} ${ot.modelo}\n` +
-            `🚘 Matrícula: ${ot.matricula}\n` +
-            `⏱️ Horas: ${ot.horas}h\n` +
-            `📊 Estado: ${ot.estado}`;
-          
-          await sendKeyboard(chatId, successText, [
-            [btn('🔧 Ver OT', 'ots:lista')],
-            [btn('🏠 Menú Principal', 'menu:principal')]
-          ]);
-          await messageService.saveMessage(chatId, 'assistant', successText);
-        } catch (error) {
-          await sendMessage(chatId, `❌ Error: ${error.message}\n\nIntenta de nuevo con /start`);
-          delete userStates[chatId];
-        }
-      }
-      return;
+    await sendKeyboard(
+      chatId,
+      `<b>➕ Nueva OT</b>\n\n📝 <b>Paso ${stepIndex + 2} de 4:</b> Ingresa ${stepNames[state.step]}`,
+      [[btn('❌ Cancelar', 'ots:cancelar')]]
+    );
+  } else {
+ await sendMessage(chatId, '⏳ Creando orden de trabajo...');
+    
+    try {
+      const ot = await otService.createOT(state.data, chatId.toString());
+      delete userStates[chatId];
+      
+      const successText =
+        '✅ <b>Orden de Trabajo creada</b>\n\n' +
+        `🔧 <b>OT-${ot.ot_id.slice(0, 8)}</b>\n` +
+        `🚗 Vehículo: ${ot.marca} ${ot.modelo}\n` +
+        `🚘 Matrícula: ${ot.matricula}\n` +
+        `📊 Estado: ${ot.estado}`;
+      
+      await sendKeyboard(chatId, successText, [
+        [btn('🔧 Ver OT', 'ots:lista')],
+        [btn('🏠 Menú Principal', 'menu:principal')]
+      ]);
+      await messageService.saveMessage(chatId, 'assistant', successText);
+    } catch (error) {
+      await sendMessage(chatId, `❌ Error: ${error.message}\n\nIntenta de nuevo con /start`);
+      delete userStates[chatId];
     }
+  }
+  return;
+}
   }
 }
 
