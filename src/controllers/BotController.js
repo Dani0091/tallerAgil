@@ -463,13 +463,12 @@ async startOTWizard(chatId, messageId) {
   async generateFacturaFromOT(chatId, messageId, otId) {
     try {
       await editMessage(chatId, messageId, '⏳ <b>Generando factura...</b>\nEsto puede tardar unos segundos.', []);
-      
+
       // Importar servicios necesarios
       const facturaService = require('../services/FacturaService');
       const { generateFacturaPDF } = require('../utils/pdfGenerator');
       const { uploadPDF } = require('../helpers/supabaseStorage');
-      const { sendTyping } = require('../helpers/telegramHelpers');
-      const { BOT_TOKEN } = require('../config/telegram');
+      const { sendDocument } = require('../helpers/telegramHelpers');
 
       // Crear factura
       const factura = await facturaService.createFromOT(otId);
@@ -483,26 +482,21 @@ async startOTWizard(chatId, messageId) {
       const pdfUrl = await uploadPDF(pdfBuffer, fileName);
 
       // Actualizar factura con el link del PDF
-      factura.pdf_link = pdfUrl;
-      await factura.save();
+      const Factura = require('../models/Factura');
+      await Factura.findOneAndUpdate(
+        { factura_id: factura.factura_id },
+        { pdf_link: pdfUrl }
+      );
 
-      // Enviar PDF por Telegram
+      // Enviar PDF por Telegram usando la función mejorada
       await sendTyping(chatId);
-      const formData = new FormData();
-      formData.append('chat_id', chatId);
-      formData.append('document', new Blob([pdfBuffer], { type: 'application/pdf' }), fileName);
-      formData.append('caption', 
+      const caption =
         `✅ <b>Factura ${factura.numero} generada</b>\n\n` +
         `💰 Total: ${factura.total_factura.toFixed(2)}€\n` +
         `📅 Vencimiento: ${new Date(factura.fecha_vencimiento).toLocaleDateString('es-ES')}\n` +
-        `🔗 <a href="${pdfUrl}">Ver en línea</a>`,
-        { parse_mode: 'HTML' }
-      );
+        `🔗 <a href="${pdfUrl}">Ver en línea</a>`;
 
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, {
-        method: 'POST',
-        body: formData
-      });
+      await sendDocument(chatId, pdfBuffer, fileName, caption);
 
       // Mostrar resumen con botones
       await sendKeyboard(
@@ -521,7 +515,7 @@ async startOTWizard(chatId, messageId) {
       await messageService.saveMessage(chatId, 'assistant', `Factura ${factura.numero} generada`);
 
     } catch (error) {
-      console.error('Error generando factura:', error);
+      console.error('❌ Error generando factura:', error);
       await sendMessage(
         chatId,
         `❌ <b>Error generando factura</b>\n\n${error.message}\n\nIntenta de nuevo más tarde.`
