@@ -344,23 +344,24 @@ async startOTWizard(chatId, messageId) {
   async showOTList(chatId, messageId) {
     try {
       const ots = await otService.listOTs(0, 10);
-      
+
       let text = '<b>📋 Lista de Órdenes de Trabajo</b>\n\n';
-      
+
       if (!ots || ots.length === 0) {
         text += 'No hay OT registradas.';
       } else {
         ots.forEach((ot, i) => {
-          text += `${i + 1}. <b>OT-${ot.OT_ID.slice(0, 8)}</b>\n`;
+          text += `${i + 1}. <b>OT-${ot.ot_id.slice(0, 8)}</b>\n`;
           text += `   🚗 Matrícula: ${ot.matricula || 'N/A'}\n`;
           text += `   🏷️ ${ot.marca || 'N/A'} ${ot.modelo || 'N/A'}\n`;
           text += `   📊 Estado: ${ot.estado}\n`;
           text += `   📅 ${new Date(ot.fecha_creacion).toLocaleDateString('es-ES')}\n\n`;
         });
       }
-      
+
       await editMessage(chatId, messageId, text, [[btn('🔙 Volver', 'menu:ots')]]);
     } catch (error) {
+      console.error('❌ Error en showOTList:', error);
       await sendMessage(chatId, '❌ Error obteniendo OT: ' + error.message);
     }
   }
